@@ -3,6 +3,9 @@
 #include <iostream>
 #include <string>
 #include <vector>
+#include <future>
+#include <thread>
+#include <chrono>
 
 // Our project headers
 #include "CipherFactory.hpp"
@@ -108,8 +111,54 @@ int main(int argc, char* argv[])
     return 1;
   }
 
-  // Run the cipher on the input text, specifying whether to encrypt/decrypt
-  std::string outputText { cipher->applyCipher( inputText, settings.cipherMode ) };
+  std::string outputText{""};
+
+  // multithreading for Caesar cipher, otherwise applyCipher called normally
+  if (settings.cipherType == CipherType::Caesar)
+    {
+      const size_t numThreads {4};
+
+      // vector to hold futures for en/decrypted chunk text in correct order
+      std::vector< std::future< std::string > > futures;
+
+      const size_t lenChunk = (inputText.size() % numThreads != 0) ? (inputText.size() / numThreads + 1) : (inputText.size() / numThreads);
+      std::string chunkText {""};
+
+      for (size_t i{0}; i<numThreads; ++i)
+	{
+	  chunkText = inputText.substr(i*lenChunk, lenChunk);
+
+	  // applyCipher for given chunk and append future to vector
+	  futures.push_back(std::async(std::launch::async, [chunkText, &cipher, &settings] () {return cipher->applyCipher(chunkText, settings.cipherMode);}));
+	}
+      
+      //delay until all are complete
+      bool complete {false};
+      while (!complete)
+	{
+	  for (auto &future : futures)
+	    {
+	      complete = true;
+	      // if thread isn't finished set complete to false
+	      auto status = future.wait_for(std::chrono::seconds(10));
+	      if (status != std::future_status::ready)
+		{
+		  complete = false;
+		}
+	    }
+	}
+      for (auto &future : futures)
+	{
+	  outputText+=future.get();
+	}
+    }
+  else
+    {
+      // Run the cipher on the input text, specifying whether to encrypt/decrypt
+      outputText = cipher->applyCipher( inputText, settings.cipherMode );
+    }
+
+
 
   // Output the transliterated text
   if (!settings.outputFile.empty()) {
